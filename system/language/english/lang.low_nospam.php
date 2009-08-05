@@ -105,8 +105,14 @@ $L = array(
 "moderate_if_unreachable" =>
 "Moderate comments if service is unreachable?",
 
+"discard_comments_if_spam" =>
+"Discard comments believed to be spam?",
+
 "low_nospam_thinks_this_is_spam" =>
 "Computer says your input might be spam, so it will be moderated first.",
+
+"low_nospam_thinks_this_is_spam_and_discarded" =>
+"Your comment appeared to be spam and was discarded.",
 
 "service_unreachable" =>
 "Your input cannot be processed right now, so it will be moderated first.",

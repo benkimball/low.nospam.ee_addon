@@ -21,7 +21,7 @@ class Low_nospam_check
 	var $settings		= array();
 
 	var $name			= 'Low NoSpam';
-	var $version		= '1.0.4';
+	var $version		= '1.0.5';
 	var $description	= 'Anti-spam utility using online services like Akismet and TypePad AntiSpam';
 	var $settings_exist = 'y';
 	var $docs_url		= '';
@@ -70,7 +70,8 @@ class Low_nospam_check
 			'check_forum_posts'			=> array('r', array('y' => "yes", 'n' => "no"), 'n'),
 			'check_wiki_articles'		=> array('r', array('y' => "yes", 'n' => "no"), 'n'),
 			'check_trackbacks'			=> array('r', array('y' => "yes", 'n' => "no"), 'y'),
-			'moderate_if_unreachable'	=> array('r', array('y' => "yes", 'n' => "no"), 'y')
+			'moderate_if_unreachable'	=> array('r', array('y' => "yes", 'n' => "no"), 'y'),
+			'discard_comments_if_spam'	=> array('r', array('y' => "yes", 'n' => "no"), 'n')
 		);
 		
 		return $settings;
@@ -100,14 +101,23 @@ class Low_nospam_check
 			// Check it!
 			if ($this->is_spam())
 			{
-				// set comment status to 'c' 
-				$data['status'] = 'c';
+				if ($this->settings['discard_comments_if_spam'] == 'n')
+				{
+					$discarded = false;
+					// set comment status to 'c'
+					$data['status'] = 'c';
 				
-				// insert closed comment to DB
-				$DB->query($DB->insert_string('exp_comments', $data));
+					// insert closed comment to DB
+					$DB->query($DB->insert_string('exp_comments', $data));
+				}
+				else
+				{
+					// else, discard comment
+					$discarded = true;
+				}
 				
 				// Exit
-				$this->abort();
+				$this->abort($discarded);
 			}
 		}
 		
@@ -176,7 +186,7 @@ class Low_nospam_check
 			if ($this->is_spam())
 			{
 				// No forum post moderation, so just exit
-				$this->abort();
+				$this->abort(false);
 			}
 		}
 
@@ -207,34 +217,43 @@ class Low_nospam_check
 			// Check it!
 			if ($this->is_spam())
 			{
-				// gallery entry id
-				$entry_id = $DB->escape_str($IN->GBL('entry_id'));
+				if ($this->settings['discard_comments_if_spam'] == 'n')
+				{
+					$discarded = false;
+					// gallery entry id
+					$entry_id = $DB->escape_str($IN->GBL('entry_id'));
 				
-				// get gallery id
-				$query = $DB->query("SELECT gallery_id FROM exp_gallery_entries WHERE entry_id = '{$entry_id}'");
+					// get gallery id
+					$query = $DB->query("SELECT gallery_id FROM exp_gallery_entries WHERE entry_id = '{$entry_id}'");
 				
-				// row to insert
-				$data = array(
-					'entry_id'		=> $entry_id,
-					'gallery_id'	=> $query->row['gallery_id'],
-					'author_id'		=> $SESS->userdata['member_id'],
-					'name'			=> $this->input['comment_author'],
-					'email'			=> $this->input['comment_author_email'],
-					'url'			=> $this->input['comment_author_url'],
-					'location'		=> $SESS->userdata['location'] ? $SESS->userdata['location'] : $IN->GBL('location'),
-					'ip_address'	=> $SESS->userdata['ip_address'],
-					'comment_date'	=> $LOC->now,
-					'comment'		=> $this->input['comment_content'],
-					'notify'		=> $IN->GBL('notify_me') ? 'y' : 'n',
-					// Set status to closed
-					'status'		=> 'c'
-				);
+					// row to insert
+					$data = array(
+						'entry_id'		=> $entry_id,
+						'gallery_id'	=> $query->row['gallery_id'],
+						'author_id'		=> $SESS->userdata['member_id'],
+						'name'			=> $this->input['comment_author'],
+						'email'			=> $this->input['comment_author_email'],
+						'url'			=> $this->input['comment_author_url'],
+						'location'		=> $SESS->userdata['location'] ? $SESS->userdata['location'] : $IN->GBL('location'),
+						'ip_address'	=> $SESS->userdata['ip_address'],
+						'comment_date'	=> $LOC->now,
+						'comment'		=> $this->input['comment_content'],
+						'notify'		=> $IN->GBL('notify_me') ? 'y' : 'n',
+						// Set status to closed
+						'status'		=> 'c'
+					);
 				
-				// insert closed comment to DB
-				$DB->query($DB->insert_string('exp_gallery_comments', $data));
+					// insert closed comment to DB
+					$DB->query($DB->insert_string('exp_gallery_comments', $data));
+				}
+				else
+				{
+					// else, discard comment
+					$discarded = true;
+				}
 				
 				// Exit
-				$this->abort();
+				$this->abort($discarded);
 			}
 		}
 		
@@ -277,7 +296,7 @@ class Low_nospam_check
 				// close revision
 				$DB->query("UPDATE exp_wiki_revisions SET revision_status = 'closed' WHERE wiki_id = {$wiki_id} AND page_id = {$page_id} AND revision_id = {$rev_id}");
 				
-				$this->abort();
+				$this->abort(false);
 			}
 
 		}
@@ -344,7 +363,7 @@ class Low_nospam_check
 	// --------------------------------
 	//	Exit!!!
 	// --------------------------------
-	function abort()
+	function abort($discarded)
 	{
 		global $OUT, $LANG, $EXT;
 		
@@ -352,7 +371,21 @@ class Low_nospam_check
 		$EXT->end_script = true;
 		
 		// return error message
-		$feedback = ($this->API->is_available) ? $LANG->line('low_nospam_thinks_this_is_spam') : $LANG->line('service_unreachable');
+		if ($this->API->is_available)
+		{
+			if ($discarded)
+			{
+				$feedback = $LANG->line('low_nospam_thinks_this_is_spam_and_discarded');
+			}
+			else
+			{
+				$feedback = $LANG->line('low_nospam_thinks_this_is_spam');
+			}
+		}
+		else
+		{
+			$feedback = $LANG->line('service_unreachable');
+		}
 		return $OUT->show_user_error('submission', $feedback);
 		
 		// hand break
